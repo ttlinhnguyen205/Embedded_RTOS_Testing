@@ -1,7 +1,0 @@
-test_suite,result,note
-Scheduler Testing,PASS,Tasks are scheduled and logged.
-Priority Scheduling,PASS,High priority tasks are executed first.
-Priority Preemption,PASS,Emergency_Task can preempt lower priority tasks.
-Deadline Testing,PASS,Deadline miss count is analyzed.
-Fault Injection,PASS,Fault events are injected and logged.
-Timing Analysis,PASS,"Response time, execution time and WCET are calculated."
