@@ -1,8 +1,0 @@
-task,run_count,avg_response_time,max_response_time,avg_execution_time,wcet,deadline,deadline_miss_count,result
-Communication_Task,8,26.0,35,14.0,14,150,0,PASS
-Control_Task,24,0.4166666666666667,10,14.333333333333334,22,50,0,PASS
-Deadline_Monitor_Task,12,15.833333333333334,25,9.833333333333334,19,100,0,PASS
-Emergency_Task,2,0.0,0,9.0,9,20,0,PASS
-Fault_Injector_Task,3,48.333333333333336,65,34.0,49,500,0,PASS
-Logger_Task,6,58.333333333333336,85,40.666666666666664,54,200,0,PASS
-Sensor_Task,12,26.666666666666668,35,9.0,9,100,0,PASS
