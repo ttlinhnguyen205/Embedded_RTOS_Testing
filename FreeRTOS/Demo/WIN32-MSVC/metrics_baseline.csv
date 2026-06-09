@@ -1,0 +1,15 @@
+label,test_num,task_name,priority,duration_ms,total_events,events_per_sec,pass_count,fail_count,stress_count,warning_count,pass_rate_pct,exec_min_us,exec_max_us,exec_avg_us,interval_min_ms,interval_max_ms,interval_avg_ms,top_event,top_event_count
+baseline,1,DoorSensor,2,2000,17,8.5,17,0,0,0,100.0,80,80,80.0,100,100,100.0,CONTEXT_SWITCH,17
+baseline,1,VisitorCounter,2,2000,11,5.5,11,0,0,0,100.0,50,50,50.0,150,150,150.0,CONTEXT_SWITCH,11
+baseline,2,FactoryHigh,3,337,1,2.97,1,0,0,0,100.0,0,0,0,0,0,0,READY_START,1
+baseline,2,FactoryLow,1,337,1,2.97,1,0,0,0,100.0,0,0,0,0,0,0,READY_START,1
+baseline,2,FactoryMed,2,337,1,2.97,1,0,0,0,100.0,0,0,0,0,0,0,READY_START,1
+baseline,3,CameraScan,2,1028,8,7.78,8,0,0,0,100.0,0,0,0,117,120,117.6,SCAN_CLEAR,8
+baseline,3,IntrusionAlert,4,1028,1,0.97,1,0,0,0,100.0,0,0,0,0,0,0,ALERT_HANDLED,1
+baseline,4,SmokeSensor,4,2018,17,8.42,17,0,0,0,100.0,0,0,0,113,119,117.0,DEADLINE_OK,17
+baseline,5,TempSensor,2,2004,1,0.5,0,0,0,1,0.0,121000,121000,121000.0,0,0,0,SOFT_MISS,1
+baseline,5,WindSensor,2,2004,1,0.5,0,0,0,1,0.0,1617000,1617000,1617000.0,0,0,0,SOFT_MISS,1
+baseline,6,EventProducer,2,2008,27,13.45,27,0,0,0,100.0,0,0,0,50,60,53.0,QUEUE_SEND,27
+baseline,6,LogConsumer,2,2008,27,13.45,27,0,0,0,100.0,0,0,0,47,61,53.3,MUTEX_LOCK,27
+baseline,7,Navigation,3,3006,17,5.66,15,0,0,0,88.2,0,0,0,120,320,157.2,PATH_CLEAR,15
+baseline,9,MeasuredTask,3,2010,19,9.45,19,0,0,0,100.0,2,5,2.9,106,111,108.8,TIMING_METRIC,19
