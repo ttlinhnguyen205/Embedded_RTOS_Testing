@@ -1,306 +1,556 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Phan tich log FreeRTOS Test Suite
-=================================
-Doc: test_suite_log.csv
-Xuat:
-  - report.txt          : bang thong ke tong hop
-  - chart_events.png    : bieu do event count moi task
-  - chart_timeline.png  : bieu do timeline (timeline Gantt don gian)
-  - chart_status.png    : bieu do trang thai PASS/FAIL/WARNING
-  - chart_exec_time.png : bieu do execution time theo task
 
-Cach dung:
-  python analyze_log.py
+"""
+FreeRTOS Test Suite Log Analyzer
+================================
+
+Input:
+    test_suite_log.csv
+
+Output:
+    report.txt
+    chart_events.png
+    chart_status.png
+    chart_exec_time.png
+    chart_response_time.png
+    chart_deadline_miss.png
+    chart_timeline.png
+    chart_priority.png
+
+Compatible with:
+    main_test_suite.c
+
+CSV columns expected:
+    timestamp_ms,
+    task_name,
+    priority,
+    event,
+    counter,
+    response_time_ms,
+    execution_time_ms,
+    deadline_ms,
+    status
 """
 
 import csv
 import os
 from collections import Counter, defaultdict
 
-LOG_FILE = "test_suite_log.csv"
-REPORT_FILE = "report.txt"
-
-# === Cau hinh matplotlib khong dung GUI backend ===
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# Font Unicode de hien thi tieng Viet
 plt.rcParams["font.family"] = "DejaVu Sans"
 
 
+LOG_FILE = "test_suite_log.csv"
+REPORT_FILE = "report.txt"
+
+
+# ==========================================================
+# READ LOG
+# ==========================================================
+
 def read_log(path):
-    """Doc file CSV, tra ve danh sach dict cac row."""
     rows = []
+
     if not os.path.exists(path):
-        print(f"[!] Khong tim thay {path}. Hay chay test suite truoc.")
+        print(f"[ERROR] Không tìm thấy file: {path}")
+        print("Hãy chạy main_test_suite.c trước để tạo test_suite_log.csv")
         return rows
 
     with open(path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
+
         for row in reader:
-            # Bo qua dong trong hoac dong SUMMARY (co the xuat hien
-            # do fprintf co \n dau)
-            if row is None:
-                continue
-            task_name = (row.get("task_name") or "").strip()
-            if not task_name:
-                continue
-            if task_name == "SUMMARY":
-                continue
-            if task_name == "timestamp_ms":
-                continue  # header duplicate do \n
             try:
+                task_name = (row.get("task_name") or "").strip()
+
+                if not task_name:
+                    continue
+
+                if task_name == "SUMMARY":
+                    continue
+
+                if task_name == "timestamp_ms":
+                    continue
+
                 row["timestamp_ms"] = int(row.get("timestamp_ms", 0))
                 row["priority"] = int(row.get("priority", 0))
                 row["counter"] = int(row.get("counter", 0))
-                row["execution_time_us"] = int(row.get("execution_time_us", 0))
-            except (ValueError, TypeError):
+                row["response_time_ms"] = int(row.get("response_time_ms", 0))
+                row["execution_time_ms"] = int(row.get("execution_time_ms", 0))
+                row["deadline_ms"] = int(row.get("deadline_ms", 0))
+
+                row["task_name"] = task_name
+                row["event"] = (row.get("event") or "").strip()
+                row["status"] = (row.get("status") or "").strip()
+
+                rows.append(row)
+
+            except Exception:
                 continue
-            rows.append(row)
+
     return rows
 
 
+# ==========================================================
+# METRIC FUNCTIONS
+# ==========================================================
+
+def avg(values):
+    if not values:
+        return 0
+    return sum(values) / len(values)
+
+
+def deadline_missed(row):
+    return (
+        row["deadline_ms"] > 0 and
+        row["response_time_ms"] > row["deadline_ms"]
+    )
+
+
+def detect_preemption_count(rows):
+    """
+    Ước lượng số lần preemption dựa trên thay đổi task đang chạy.
+    Nếu task trước có priority thấp hơn task sau, xem như task thấp bị preempt.
+    """
+    count = 0
+
+    sorted_rows = sorted(rows, key=lambda r: r["timestamp_ms"])
+
+    for i in range(1, len(sorted_rows)):
+        prev = sorted_rows[i - 1]
+        curr = sorted_rows[i]
+
+        if prev["task_name"] != curr["task_name"]:
+            if curr["priority"] > prev["priority"]:
+                count += 1
+
+    return count
+
+
+# ==========================================================
+# WRITE REPORT
+# ==========================================================
+
 def write_report(rows):
-    """Viet bao cao tong hop."""
-    total = len(rows)
+    total_events = len(rows)
+
     task_counter = Counter(r["task_name"] for r in rows)
     event_counter = Counter(r["event"] for r in rows)
     status_counter = Counter(r["status"] for r in rows)
 
-    # Execution time theo task
     exec_by_task = defaultdict(list)
+    response_by_task = defaultdict(list)
+    deadline_by_task = defaultdict(int)
+    priority_by_task = {}
+
+    total_deadline_miss = 0
+
     for r in rows:
-        if r["execution_time_us"] > 0:
-            exec_by_task[r["task_name"]].append(r["execution_time_us"])
+        task = r["task_name"]
+
+        exec_by_task[task].append(r["execution_time_ms"])
+        response_by_task[task].append(r["response_time_ms"])
+        priority_by_task[task] = r["priority"]
+
+        if deadline_missed(r):
+            total_deadline_miss += 1
+            deadline_by_task[task] += 1
+
+    pass_count = sum(
+        count for status, count in status_counter.items()
+        if "PASS" in status.upper()
+    )
+
+    fail_count = sum(
+        count for status, count in status_counter.items()
+        if "FAIL" in status.upper()
+    )
+
+    warning_count = sum(
+        count for status, count in status_counter.items()
+        if "WARN" in status.upper() or "WARNING" in status.upper()
+    )
+
+    pass_rate = pass_count * 100 / total_events if total_events else 0
+    fail_rate = fail_count * 100 / total_events if total_events else 0
+    deadline_miss_rate = total_deadline_miss * 100 / total_events if total_events else 0
+
+    preemption_count = detect_preemption_count(rows)
+
+    start_ts = min(r["timestamp_ms"] for r in rows)
+    end_ts = max(r["timestamp_ms"] for r in rows)
+    duration = end_ts - start_ts
 
     with open(REPORT_FILE, "w", encoding="utf-8") as out:
-        out.write("=" * 70 + "\n")
-        out.write("  PHAN TICH LOG FREE RTOS TEST SUITE\n")
-        out.write("=" * 70 + "\n\n")
+        out.write("=" * 80 + "\n")
+        out.write("FREE RTOS TEST SUITE ANALYSIS REPORT\n")
+        out.write("=" * 80 + "\n\n")
 
-        out.write(f"Tong so events: {total}\n")
-        if rows:
-            start_ts = rows[0]["timestamp_ms"]
-            end_ts = max(r["timestamp_ms"] for r in rows)
-            out.write(f"Thoi gian bat dau: {start_ts} ms\n")
-            out.write(f"Thoi gian ket thuc: {end_ts} ms\n")
-            out.write(f"Tong thoi gian: {end_ts - start_ts} ms "
-                      f"({(end_ts - start_ts)/1000:.1f} giay)\n")
+        out.write("1. TỔNG QUAN TEST RUN\n")
+        out.write("-" * 80 + "\n")
+        out.write(f"Tổng số event              : {total_events}\n")
+        out.write(f"Thời gian bắt đầu          : {start_ts} ms\n")
+        out.write(f"Thời gian kết thúc         : {end_ts} ms\n")
+        out.write(f"Tổng thời gian chạy        : {duration} ms ({duration / 1000:.2f} giây)\n")
+        out.write(f"Số lần Priority Preemption : {preemption_count}\n")
         out.write("\n")
 
-        # Bang theo task
-        out.write("-" * 70 + "\n")
-        out.write("  SO EVENT THEO TASK\n")
-        out.write("-" * 70 + "\n")
-        out.write(f"{'Task':<25} {'So event':>10} {'Ty le':>10}\n")
-        for task, cnt in sorted(task_counter.items(),
-                                key=lambda x: -x[1]):
-            pct = cnt * 100.0 / total if total else 0
-            out.write(f"{task:<25} {cnt:>10} {pct:>9.1f}%\n")
+        out.write("2. PASS / FAIL EVALUATION\n")
+        out.write("-" * 80 + "\n")
+        out.write(f"PASS events                : {pass_count}\n")
+        out.write(f"FAIL events                : {fail_count}\n")
+        out.write(f"WARNING events             : {warning_count}\n")
+        out.write(f"PASS rate                  : {pass_rate:.2f}%\n")
+        out.write(f"FAIL rate                  : {fail_rate:.2f}%\n")
         out.write("\n")
 
-        # Bang theo status
-        out.write("-" * 70 + "\n")
-        out.write("  THONG KE STATUS\n")
-        out.write("-" * 70 + "\n")
-        for status, cnt in sorted(status_counter.items(),
-                                   key=lambda x: -x[1]):
-            pct = cnt * 100.0 / total if total else 0
-            out.write(f"{status:<20} {cnt:>10} {pct:>9.1f}%\n")
+        out.write("3. DEADLINE ANALYSIS\n")
+        out.write("-" * 80 + "\n")
+        out.write(f"Deadline miss              : {total_deadline_miss}\n")
+        out.write(f"Deadline miss rate         : {deadline_miss_rate:.2f}%\n")
         out.write("\n")
 
-        # Execution time stats
-        out.write("-" * 70 + "\n")
-        out.write("  THONG KE EXECUTION TIME (us)\n")
-        out.write("-" * 70 + "\n")
-        out.write(f"{'Task':<25} {'Min':>8} {'Max':>8} {'Avg':>8} {'N':>6}\n")
-        for task, times in sorted(exec_by_task.items()):
-            if not times:
-                continue
-            out.write(f"{task:<25} {min(times):>8} {max(times):>8} "
-                      f"{sum(times)//len(times):>8} {len(times):>6}\n")
+        out.write(f"{'Task':<25}{'Deadline Miss':>15}\n")
+        for task in sorted(task_counter.keys()):
+            out.write(f"{task:<25}{deadline_by_task[task]:>15}\n")
         out.write("\n")
 
-        # Top events
-        out.write("-" * 70 + "\n")
-        out.write("  TOP 10 EVENT PHO BIEN\n")
-        out.write("-" * 70 + "\n")
-        for event, cnt in event_counter.most_common(10):
-            out.write(f"{event:<30} {cnt:>8}\n")
+        out.write("4. TASK EVENT SUMMARY\n")
+        out.write("-" * 80 + "\n")
+        out.write(f"{'Task':<25}{'Priority':>10}{'Events':>10}{'Percent':>12}\n")
 
-    print(f"[+] Da ghi bao cao: {REPORT_FILE}")
+        for task, count in sorted(task_counter.items(), key=lambda x: -x[1]):
+            pct = count * 100 / total_events if total_events else 0
+            out.write(
+                f"{task:<25}"
+                f"{priority_by_task.get(task, 0):>10}"
+                f"{count:>10}"
+                f"{pct:>11.2f}%\n"
+            )
+        out.write("\n")
+
+        out.write("5. EXECUTION TIME ANALYSIS (ms)\n")
+        out.write("-" * 80 + "\n")
+        out.write(f"{'Task':<25}{'Min':>10}{'Avg':>10}{'Max/WCET':>12}{'Samples':>10}\n")
+
+        for task, values in sorted(exec_by_task.items()):
+            out.write(
+                f"{task:<25}"
+                f"{min(values):>10}"
+                f"{avg(values):>10.2f}"
+                f"{max(values):>12}"
+                f"{len(values):>10}\n"
+            )
+        out.write("\n")
+
+        out.write("6. RESPONSE TIME ANALYSIS (ms)\n")
+        out.write("-" * 80 + "\n")
+        out.write(f"{'Task':<25}{'Min':>10}{'Avg':>10}{'Max':>10}{'Samples':>10}\n")
+
+        for task, values in sorted(response_by_task.items()):
+            out.write(
+                f"{task:<25}"
+                f"{min(values):>10}"
+                f"{avg(values):>10.2f}"
+                f"{max(values):>10}"
+                f"{len(values):>10}\n"
+            )
+        out.write("\n")
+
+        out.write("7. STATUS SUMMARY\n")
+        out.write("-" * 80 + "\n")
+
+        for status, count in sorted(status_counter.items(), key=lambda x: -x[1]):
+            pct = count * 100 / total_events if total_events else 0
+            out.write(f"{status:<25}{count:>10}{pct:>11.2f}%\n")
+        out.write("\n")
+
+        out.write("8. TOP EVENTS\n")
+        out.write("-" * 80 + "\n")
+
+        for event, count in event_counter.most_common(15):
+            out.write(f"{event:<40}{count:>10}\n")
+
+        out.write("\n")
+        out.write("9. KẾT LUẬN TỰ ĐỘNG\n")
+        out.write("-" * 80 + "\n")
+
+        if fail_count == 0 and total_deadline_miss == 0:
+            out.write("Kết luận: Test suite đạt yêu cầu. Không phát hiện FAIL hoặc deadline miss.\n")
+        elif fail_count > 0 and total_deadline_miss == 0:
+            out.write("Kết luận: Có lỗi chức năng hoặc đồng bộ, nhưng chưa phát hiện deadline miss.\n")
+        elif fail_count == 0 and total_deadline_miss > 0:
+            out.write("Kết luận: Hệ thống có vấn đề timing/deadline dù chưa có FAIL trực tiếp.\n")
+        else:
+            out.write("Kết luận: Hệ thống có cả lỗi FAIL và deadline miss, cần phân tích lại scheduler/deadline.\n")
+
+    print(f"[OK] Đã tạo {REPORT_FILE}")
 
 
-def chart_events_by_task(rows):
-    """Bieu do cot: so event moi task."""
-    task_counter = Counter(r["task_name"] for r in rows if r["task_name"] != "TEST_CTRL")
-    if not task_counter:
-        return
+# ==========================================================
+# CHARTS
+# ==========================================================
 
-    tasks = list(task_counter.keys())
-    counts = list(task_counter.values())
+def chart_events(rows):
+    counter = Counter(r["task_name"] for r in rows)
+
+    tasks = list(counter.keys())
+    values = list(counter.values())
 
     plt.figure(figsize=(12, 6))
-    bars = plt.bar(range(len(tasks)), counts, color="steelblue", edgecolor="black")
-    plt.xticks(range(len(tasks)), tasks, rotation=45, ha="right")
-    plt.ylabel("So event")
-    plt.title("So Event Theo Task")
-    plt.grid(axis="y", linestyle="--", alpha=0.5)
+    bars = plt.bar(tasks, values)
 
-    # Ghi so len moi cot
-    for bar, count in zip(bars, counts):
-        plt.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
-                 str(count), ha="center", va="bottom", fontsize=9)
+    plt.xticks(rotation=45, ha="right")
+    plt.ylabel("Số event")
+    plt.title("Số Event Theo Task")
+
+    for bar, value in zip(bars, values):
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height(),
+            str(value),
+            ha="center",
+            va="bottom"
+        )
 
     plt.tight_layout()
-    plt.savefig("chart_events.png", dpi=100)
+    plt.savefig("chart_events.png", dpi=120)
     plt.close()
-    print("[+] Da xuat: chart_events.png")
+
+    print("[OK] Đã tạo chart_events.png")
 
 
-def chart_status_pie(rows):
-    """Bieu do tron: phan bo status."""
-    status_counter = Counter(r["status"] for r in rows if r["task_name"] != "TEST_CTRL")
-    if not status_counter:
+def chart_status(rows):
+    counter = Counter(r["status"] for r in rows)
+
+    if not counter:
         return
 
-    labels = list(status_counter.keys())
-    sizes = list(status_counter.values())
-    colors = []
-    for s in labels:
-        if "PASS" in s:
-            colors.append("seagreen")
-        elif "FAIL" in s:
-            colors.append("crimson")
-        elif "WARN" in s:
-            colors.append("orange")
-        else:
-            colors.append("steelblue")
+    labels = list(counter.keys())
+    values = list(counter.values())
 
     plt.figure(figsize=(8, 8))
-    plt.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%",
-            startangle=90, wedgeprops=dict(edgecolor="white", linewidth=1))
-    plt.title("Phan Bo Status")
+    plt.pie(
+        values,
+        labels=labels,
+        autopct="%1.1f%%",
+        startangle=90
+    )
+
+    plt.title("Phân Bố PASS / FAIL / WARNING")
     plt.axis("equal")
     plt.tight_layout()
-    plt.savefig("chart_status.png", dpi=100)
+    plt.savefig("chart_status.png", dpi=120)
     plt.close()
-    print("[+] Da xuat: chart_status.png")
+
+    print("[OK] Đã tạo chart_status.png")
 
 
-def chart_exec_time_by_task(rows):
-    """Bieu do cot nhom: min/avg/max execution time moi task."""
-    exec_by_task = defaultdict(list)
+def chart_exec_time(rows):
+    data = defaultdict(list)
+
     for r in rows:
-        if r["task_name"] == "TEST_CTRL":
-            continue
-        if r["execution_time_us"] > 0:
-            exec_by_task[r["task_name"]].append(r["execution_time_us"])
+        data[r["task_name"]].append(r["execution_time_ms"])
 
-    if not exec_by_task:
-        return
+    tasks = []
+    mins = []
+    avgs = []
+    maxs = []
 
-    tasks = list(exec_by_task.keys())
-    mins = [min(exec_by_task[t]) for t in tasks]
-    avgs = [sum(exec_by_task[t])//len(exec_by_task[t]) for t in tasks]
-    maxs = [max(exec_by_task[t]) for t in tasks]
+    for task, values in sorted(data.items()):
+        tasks.append(task)
+        mins.append(min(values))
+        avgs.append(avg(values))
+        maxs.append(max(values))
 
     x = range(len(tasks))
     width = 0.25
 
-    plt.figure(figsize=(12, 6))
-    plt.bar([i - width for i in x], mins, width, label="Min", color="lightgreen")
-    plt.bar(x, avgs, width, label="Avg", color="steelblue")
-    plt.bar([i + width for i in x], maxs, width, label="Max", color="salmon")
+    plt.figure(figsize=(13, 6))
+
+    plt.bar([i - width for i in x], mins, width, label="Min")
+    plt.bar(x, avgs, width, label="Avg")
+    plt.bar([i + width for i in x], maxs, width, label="Max/WCET")
 
     plt.xticks(list(x), tasks, rotation=45, ha="right")
-    plt.ylabel("Execution time (us)")
-    plt.title("Min / Avg / Max Execution Time Theo Task")
+    plt.ylabel("Execution Time (ms)")
+    plt.title("Min / Avg / WCET Execution Time Theo Task")
     plt.legend()
-    plt.grid(axis="y", linestyle="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig("chart_exec_time.png", dpi=100)
+    plt.savefig("chart_exec_time.png", dpi=120)
     plt.close()
-    print("[+] Da xuat: chart_exec_time.png")
+
+    print("[OK] Đã tạo chart_exec_time.png")
+
+
+def chart_response_time(rows):
+    data = defaultdict(list)
+
+    for r in rows:
+        data[r["task_name"]].append(r["response_time_ms"])
+
+    tasks = []
+    mins = []
+    avgs = []
+    maxs = []
+
+    for task, values in sorted(data.items()):
+        tasks.append(task)
+        mins.append(min(values))
+        avgs.append(avg(values))
+        maxs.append(max(values))
+
+    x = range(len(tasks))
+    width = 0.25
+
+    plt.figure(figsize=(13, 6))
+
+    plt.bar([i - width for i in x], mins, width, label="Min")
+    plt.bar(x, avgs, width, label="Avg")
+    plt.bar([i + width for i in x], maxs, width, label="Max")
+
+    plt.xticks(list(x), tasks, rotation=45, ha="right")
+    plt.ylabel("Response Time (ms)")
+    plt.title("Response Time Theo Task")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("chart_response_time.png", dpi=120)
+    plt.close()
+
+    print("[OK] Đã tạo chart_response_time.png")
+
+
+def chart_deadline_miss(rows):
+    counter = defaultdict(int)
+
+    for r in rows:
+        if deadline_missed(r):
+            counter[r["task_name"]] += 1
+
+    if not counter:
+        counter["No Deadline Miss"] = 0
+
+    tasks = list(counter.keys())
+    values = list(counter.values())
+
+    plt.figure(figsize=(12, 6))
+    bars = plt.bar(tasks, values)
+
+    plt.xticks(rotation=45, ha="right")
+    plt.ylabel("Số lần deadline miss")
+    plt.title("Deadline Miss Theo Task")
+
+    for bar, value in zip(bars, values):
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height(),
+            str(value),
+            ha="center",
+            va="bottom"
+        )
+
+    plt.tight_layout()
+    plt.savefig("chart_deadline_miss.png", dpi=120)
+    plt.close()
+
+    print("[OK] Đã tạo chart_deadline_miss.png")
+
+
+def chart_priority(rows):
+    priority_by_task = {}
+
+    for r in rows:
+        priority_by_task[r["task_name"]] = r["priority"]
+
+    tasks = list(priority_by_task.keys())
+    priorities = list(priority_by_task.values())
+
+    plt.figure(figsize=(12, 6))
+    bars = plt.bar(tasks, priorities)
+
+    plt.xticks(rotation=45, ha="right")
+    plt.ylabel("Priority")
+    plt.title("Priority Level Theo Task")
+
+    for bar, value in zip(bars, priorities):
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height(),
+            str(value),
+            ha="center",
+            va="bottom"
+        )
+
+    plt.tight_layout()
+    plt.savefig("chart_priority.png", dpi=120)
+    plt.close()
+
+    print("[OK] Đã tạo chart_priority.png")
 
 
 def chart_timeline(rows):
-    """Bieu do timeline: moi chuong trinh test khi nao xuat hien event."""
-    if not rows:
-        return
+    sorted_rows = sorted(rows, key=lambda r: r["timestamp_ms"])
 
-    tasks = sorted(set(r["task_name"] for r in rows if r["task_name"] != "TEST_CTRL"))
-    if not tasks:
-        return
+    tasks = sorted(set(r["task_name"] for r in sorted_rows))
+    task_index = {task: i for i, task in enumerate(tasks)}
 
-    task_idx = {t: i for i, t in enumerate(tasks)}
+    plt.figure(figsize=(15, 7))
 
-    plt.figure(figsize=(14, 6))
-
-    for r in rows:
-        if r["task_name"] not in task_idx:
-            continue
-        y = task_idx[r["task_name"]]
+    for r in sorted_rows:
         x = r["timestamp_ms"]
+        y = task_index[r["task_name"]]
 
-        # Mau theo status
-        s = r["status"]
-        if "PASS" in s:
-            color = "seagreen"
-        elif "FAIL" in s:
-            color = "crimson"
-        elif "WARN" in s:
-            color = "orange"
-        else:
-            color = "steelblue"
-
-        plt.scatter(x, y, c=color, s=15, alpha=0.6, edgecolors="none")
+        plt.scatter(x, y, s=15)
 
     plt.yticks(range(len(tasks)), tasks)
     plt.xlabel("Timestamp (ms)")
-    plt.title("Timeline Events Theo Task")
-    plt.grid(axis="x", linestyle="--", alpha=0.5)
-
-    # Legend
-    from matplotlib.patches import Patch
-    legend = [
-        Patch(color="seagreen", label="PASS"),
-        Patch(color="crimson", label="FAIL"),
-        Patch(color="orange", label="WARNING"),
-        Patch(color="steelblue", label="KHAC"),
-    ]
-    plt.legend(handles=legend, loc="upper right")
-
+    plt.ylabel("Task")
+    plt.title("Timeline Event Theo Task")
     plt.tight_layout()
-    plt.savefig("chart_timeline.png", dpi=100)
+    plt.savefig("chart_timeline.png", dpi=120)
     plt.close()
-    print("[+] Da xuat: chart_timeline.png")
 
+    print("[OK] Đã tạo chart_timeline.png")
+
+
+# ==========================================================
+# MAIN
+# ==========================================================
 
 def main():
     rows = read_log(LOG_FILE)
+
     if not rows:
         return
 
-    print(f"[*] Doc duoc {len(rows)} events tu {LOG_FILE}")
-    print()
+    print(f"[INFO] Đọc được {len(rows)} events từ {LOG_FILE}")
 
     write_report(rows)
-    chart_events_by_task(rows)
-    chart_status_pie(rows)
-    chart_exec_time_by_task(rows)
+
+    chart_events(rows)
+    chart_status(rows)
+    chart_exec_time(rows)
+    chart_response_time(rows)
+    chart_deadline_miss(rows)
+    chart_priority(rows)
     chart_timeline(rows)
 
     print()
-    print("Hoan thanh! Cac file da tao:")
-    print(f"  - {REPORT_FILE}")
-    print("  - chart_events.png")
-    print("  - chart_status.png")
-    print("  - chart_exec_time.png")
-    print("  - chart_timeline.png")
+    print("HOÀN THÀNH PHÂN TÍCH LOG")
+    print("Các file đã tạo:")
+    print(" - report.txt")
+    print(" - chart_events.png")
+    print(" - chart_status.png")
+    print(" - chart_exec_time.png")
+    print(" - chart_response_time.png")
+    print(" - chart_deadline_miss.png")
+    print(" - chart_priority.png")
+    print(" - chart_timeline.png")
 
 
 if __name__ == "__main__":

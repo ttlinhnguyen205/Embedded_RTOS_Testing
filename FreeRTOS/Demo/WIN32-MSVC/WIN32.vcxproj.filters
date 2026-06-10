@@ -133,9 +133,6 @@
     <ClCompile Include="main_full.c">
       <Filter>Demo App Source\Full_Demo</Filter>
     </ClCompile>
-    <ClCompile Include="main_test_suite.c">
-      <Filter>Demo App Source\Test_Suite</Filter>
-    </ClCompile>
     <ClCompile Include="..\Common\Minimal\StaticAllocation.c">
       <Filter>Demo App Source\Full_Demo\Common Demo Tasks</Filter>
     </ClCompile>
@@ -162,6 +159,9 @@
     </ClCompile>
     <ClCompile Include="..\Common\Minimal\MessageBufferAMP.c">
       <Filter>Demo App Source\Full_Demo\Common Demo Tasks</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\ADMIN\Downloads\abcd\main_test_suite.c">
+      <Filter>Demo App Source\Test_Suite</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

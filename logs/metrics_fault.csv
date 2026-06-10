@@ -1,0 +1,3 @@
+label,test_num,test_name,test_result,task_name,priority,duration_ms,total_events,events_per_sec,pass_count,fail_count,stress_count,warning_count,deadline_miss_count,pass_rate_pct,exec_min_ms,exec_avg_ms,exec_max_ms_WCET,response_min_ms,response_avg_ms,response_max_ms,deadline_ms,interval_min_ms,interval_avg_ms,interval_max_ms,top_event,top_event_count
+fault_injection,8,TEST_08_FAULT_INJECTION,FAIL,Control_Task,4,1000,9,9.0,0,9,0,0,9,0.0,60,60.0,60,0,0.0,0,50,110,110.0,110,DEADLINE_MISS,9
+fault_injection,8,TEST_08_FAULT_INJECTION,FAIL,Fault_Injector_Task,2,1000,50,50.0,0,0,50,0,0,0.0,0,0.0,0,0,0.0,0,0,20,20.02,21,CPU_OVERLOAD,50
